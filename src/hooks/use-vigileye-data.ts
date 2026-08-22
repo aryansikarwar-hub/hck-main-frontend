@@ -158,14 +158,16 @@ export interface CreateStructureInput {
 /**
  * Why a createStructure call was refused, in words the user can act on.
  *
- * `createStructure` is `@Roles("engineer", "admin")` (StructuresResolver) but
- * signup always creates an inspector, so the single most likely outcome of
- * pressing Register is a 403 — and all the API says is "Forbidden resource".
- * Naming the role that is missing, and where to get it, is the difference
- * between a user who knows what to do next and one who thinks the app broke.
+ * `createStructure` is `@Roles("inspector", "engineer", "admin")`
+ * (StructuresResolver), so every signed-in account can register a structure and
+ * a 403 now means one specific thing: a `public-read` account. All the API says
+ * is "Forbidden resource", which explains nothing.
+ *
+ * It used to be engineer/admin only, which in practice locked everyone out —
+ * signup always issues `inspector` and no admin existed to promote anyone.
  */
 export const REGISTER_FORBIDDEN_MESSAGE =
-  "Registering a structure requires the engineer or admin role. New accounts start as inspectors — ask an admin to change your role on the Admin page.";
+  "Your account is read-only, so it can't register a structure. Ask an admin to change your role on the Admin page.";
 
 export function createStructureErrorMessage(error: unknown): string {
   const status = (error as ApiError | null)?.status;

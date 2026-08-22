@@ -23,8 +23,8 @@ import type { Role, Structure } from "@/lib/types";
 
 const STRUCTURE_TYPES: Structure["type"][] = ["bridge", "dam", "building", "tunnel"];
 
-/** Mirrors `@Roles("engineer", "admin")` on StructuresResolver.createStructure. */
-const ROLES_THAT_MAY_REGISTER: Role[] = ["engineer", "admin"];
+/** Mirrors `@Roles("inspector", "engineer", "admin")` on StructuresResolver.createStructure. */
+const ROLES_THAT_MAY_REGISTER: Role[] = ["inspector", "engineer", "admin"];
 
 const CRITICALITY = [
   { value: 1, label: "1 — Low", hint: "Redundant route, low traffic, few people affected" },
