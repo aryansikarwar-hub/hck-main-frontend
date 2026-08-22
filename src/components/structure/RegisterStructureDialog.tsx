@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus, ShieldAlert } from "lucide-react";
 import {
   Dialog,
   DialogClose,
@@ -13,10 +13,18 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useCreateStructure } from "@/hooks/use-vigileye-data";
-import type { Structure } from "@/lib/types";
+import {
+  REGISTER_FORBIDDEN_MESSAGE,
+  createStructureErrorMessage,
+  useCreateStructure,
+  useSession,
+} from "@/hooks/use-vigileye-data";
+import type { Role, Structure } from "@/lib/types";
 
 const STRUCTURE_TYPES: Structure["type"][] = ["bridge", "dam", "building", "tunnel"];
+
+/** Mirrors `@Roles("engineer", "admin")` on StructuresResolver.createStructure. */
+const ROLES_THAT_MAY_REGISTER: Role[] = ["engineer", "admin"];
 
 const CRITICALITY = [
   { value: 1, label: "1 — Low", hint: "Redundant route, low traffic, few people affected" },
@@ -31,13 +39,26 @@ const CRITICALITY = [
  * fictional San Francisco structures — the GraphQL API had no create mutation
  * at all, so there was no way to put a real bridge on the map from the app.
  *
- * Requires the engineer or admin role (see StructuresResolver). An inspector
- * hitting this gets a 403 with a message saying so, rather than a silent
- * no-op.
+ * Requires the engineer or admin role (see StructuresResolver), and signup
+ * always creates an inspector — so being refused is the common case, not the
+ * edge case. Two things make that legible instead of baffling:
+ *
+ *  - The role is checked against the session up front, so an inspector reads
+ *    why the form won't work before filling it in.
+ *  - A refusal that does happen is shown inline and stays on screen. It used
+ *    to be a toast carrying the API's raw "Forbidden resource" (in fact the
+ *    whole ClientError JSON blob — see gql() in api-client.ts), which said
+ *    nothing about roles and vanished after a few seconds.
  */
 export function RegisterStructureDialog() {
   const [open, setOpen] = useState(false);
   const createStructure = useCreateStructure();
+  const { data: session } = useSession();
+
+  // Undefined role = the session hasn't loaded yet. Don't warn on a maybe;
+  // the server is the authority either way.
+  const roleBlocked = Boolean(session && !ROLES_THAT_MAY_REGISTER.includes(session.role));
+  const failure = createStructure.error ? createStructureErrorMessage(createStructure.error) : null;
 
   // Controlled because the dialog unmounts its children on close, and a
   // half-filled form should not survive to the next open.
@@ -55,6 +76,9 @@ export function RegisterStructureDialog() {
     setLng("");
     setZoneId("");
     setCriticalityWeight(1);
+    // Otherwise the previous attempt's refusal is still on screen when the
+    // dialog is reopened with a blank form.
+    createStructure.reset();
   }
 
   const latNum = Number(lat);
@@ -88,8 +112,10 @@ export function RegisterStructureDialog() {
     }
   }
 
-  /** Fills the coordinates from the browser, for registering where you stand. */
-  function useMyLocation() {
+  /** Fills the coordinates from the browser, for registering where you stand.
+   *  Not named use* — an onClick handler that looks like a hook trips
+   *  react-hooks/rules-of-hooks. */
+  function fillFromCurrentLocation() {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -124,6 +150,16 @@ export function RegisterStructureDialog() {
             It appears on the map immediately and becomes a valid target for inspection uploads.
           </DialogDescription>
         </DialogHeader>
+
+        {roleBlocked && (
+          <div className="flex items-start gap-2.5 rounded-md border border-severity-high/30 bg-severity-high/10 p-3 text-sm">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-severity-high" aria-hidden />
+            <p className="text-muted-foreground">
+              You&apos;re signed in as{" "}
+              <span className="font-medium capitalize text-foreground">{session?.role}</span>. {REGISTER_FORBIDDEN_MESSAGE}
+            </p>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -196,7 +232,7 @@ export function RegisterStructureDialog() {
 
           <button
             type="button"
-            onClick={useMyLocation}
+            onClick={fillFromCurrentLocation}
             className="text-xs font-medium text-primary hover:underline"
           >
             Use my current location
@@ -243,6 +279,17 @@ export function RegisterStructureDialog() {
             Risk level starts at <span className="font-medium">low</span> — no inspection has happened yet. The
             first analysed upload sets it from what the model actually finds.
           </p>
+
+          {/* Inline and persistent, unlike the toast: a duplicate name or a
+              role refusal is something the user has to read and act on. */}
+          {failure && !roleBlocked && (
+            <p
+              role="alert"
+              className="rounded-md border border-severity-critical/30 bg-severity-critical/10 p-3 text-sm text-muted-foreground"
+            >
+              {failure}
+            </p>
+          )}
 
           <div className="flex justify-end gap-2 pt-1">
             <DialogClose asChild>

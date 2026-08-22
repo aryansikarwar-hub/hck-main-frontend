@@ -3,10 +3,12 @@
 import { useMemo } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { PiggyBank } from "lucide-react";
+import { Building2, PiggyBank } from "lucide-react";
 import { Topbar } from "@/components/layout/Topbar";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ErrorState, LoadingRows } from "@/components/common/QueryState";
+import { RegisterStructureDialog } from "@/components/structure/RegisterStructureDialog";
 import { useAlerts, useStructures } from "@/hooks/use-vigileye-data";
 import type { BudgetItem, Severity } from "@/lib/types";
 import { SEVERITY_COLOR_CLASS, SEVERITY_LABEL, cn } from "@/lib/utils";
@@ -61,7 +63,11 @@ export default function BudgetPage() {
   }, [alertsQuery.data, structuresQuery.data]);
 
   const totalCost = items.reduce((sum, i) => sum + i.estimatedCostUsd, 0);
+  // The trailing 1 is load-bearing twice over: Math.max() of an empty list is
+  // -Infinity, and it is also the divisor for every progress bar below.
   const maxScore = Math.max(...items.map((i) => i.priorityScore), 1);
+
+  const nothingMonitored = structuresQuery.isSuccess && structuresQuery.data.length === 0;
 
   return (
     <>
@@ -72,11 +78,28 @@ export default function BudgetPage() {
         ) : isError ? (
           <ErrorState message={error?.message} onRetry={() => { alertsQuery.refetch(); structuresQuery.refetch(); }} />
         ) : items.length === 0 ? (
-          <EmptyState
-            icon={PiggyBank}
-            title="Nothing to fund right now"
-            description="The budget ranking is built from unacknowledged alerts. When a detection crosses a severity threshold it appears here with an estimated repair cost."
-          />
+          // Same distinction the alert inbox makes: "no repairs needed" and
+          // "nothing has ever been inspected" must not look identical on a
+          // page whose output is a funding figure.
+          nothingMonitored ? (
+            <EmptyState
+              icon={Building2}
+              title="No structures to budget for"
+              description="This ranking is derived from alerts raised against monitored structures. With nothing registered there is no repair backlog to estimate — a $0 budget here would mean nothing has been looked at, not that nothing needs fixing."
+              action={<RegisterStructureDialog />}
+            />
+          ) : (
+            <EmptyState
+              icon={PiggyBank}
+              title="Nothing to fund right now"
+              description="The ranking is built from unacknowledged alerts. When a detection crosses a severity threshold it appears here with an estimated repair cost."
+              action={
+                <Link href="/alerts">
+                  <Button variant="outline">Review the alert inbox</Button>
+                </Link>
+              }
+            />
+          )
         ) : (
           <div className="space-y-6 p-6">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

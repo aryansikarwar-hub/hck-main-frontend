@@ -2,8 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { MUTATIONS, QUERIES, gql } from "@/lib/api-client";
-import type { AccountUser, Alert, Detection, MlStatus, Role, Structure } from "@/lib/types";
+import { MUTATIONS, QUERIES, gql, type ApiError } from "@/lib/api-client";
+import type { AccountUser, Alert, Detection, MlStatus, Role, SessionUser, Structure } from "@/lib/types";
 import { normalizeSeverity } from "@/lib/utils";
 
 export const queryKeys = {
@@ -12,6 +12,7 @@ export const queryKeys = {
   alerts: (limit: number, offset: number) => ["alerts", limit, offset] as const,
   mlStatus: () => ["ml-status"] as const,
   users: () => ["users"] as const,
+  session: () => ["session"] as const,
 };
 
 export interface StructureFilters {
@@ -34,9 +35,15 @@ export interface StructureFilters {
  * Normalising here, at the single boundary where API data enters the app,
  * means every component downstream sees exactly what the TypeScript types
  * promise. Do not scatter `.toLowerCase()` through the components.
+ *
+ * Underscores become hyphens for the same reason: `CaptureSource.FIXED_CAMERA
+ * = "fixed-camera"` goes over the wire as "FIXED_CAMERA", which rendered as
+ * "captured via fixed_camera" on the detection timeline.
  */
 function lower<T extends string>(value: unknown, fallback: T): T {
-  return typeof value === "string" && value.length > 0 ? (value.toLowerCase() as T) : fallback;
+  return typeof value === "string" && value.length > 0
+    ? (value.toLowerCase().replace(/_/g, "-") as T)
+    : fallback;
 }
 
 function normalizeStructure(s: Structure): Structure {
@@ -53,9 +60,6 @@ function normalizeDetection(d: Detection): Detection {
     severity: normalizeSeverity(d.severity),
     crackType: lower(d.crackType, "hairline"),
     capturedBy: lower(d.capturedBy, "web"),
-    measurementSource: d.measurementSource
-      ? lower(d.measurementSource, "bbox-heuristic")
-      : undefined,
   };
 }
 
@@ -151,6 +155,24 @@ export interface CreateStructureInput {
   zoneId?: string;
 }
 
+/**
+ * Why a createStructure call was refused, in words the user can act on.
+ *
+ * `createStructure` is `@Roles("engineer", "admin")` (StructuresResolver) but
+ * signup always creates an inspector, so the single most likely outcome of
+ * pressing Register is a 403 — and all the API says is "Forbidden resource".
+ * Naming the role that is missing, and where to get it, is the difference
+ * between a user who knows what to do next and one who thinks the app broke.
+ */
+export const REGISTER_FORBIDDEN_MESSAGE =
+  "Registering a structure requires the engineer or admin role. New accounts start as inspectors — ask an admin to change your role on the Admin page.";
+
+export function createStructureErrorMessage(error: unknown): string {
+  const status = (error as ApiError | null)?.status;
+  if (status === 403) return REGISTER_FORBIDDEN_MESSAGE;
+  return (error as Error | null)?.message || "Could not register the structure.";
+}
+
 export function useCreateStructure() {
   const queryClient = useQueryClient();
 
@@ -164,7 +186,7 @@ export function useCreateStructure() {
       toast.success(`${structure.name} is now being monitored`);
     },
     onError: (error: Error) => {
-      toast.error(error.message || "Could not register the structure");
+      toast.error(createStructureErrorMessage(error));
     },
   });
 }
@@ -196,6 +218,31 @@ export function useMlStatus() {
     queryKey: queryKeys.mlStatus(),
     queryFn: () => gql<{ mlStatus: MlStatus }>(QUERIES.mlStatus).then((d) => d.mlStatus),
     refetchInterval: 60_000,
+  });
+}
+
+/**
+ * The signed-in account.
+ *
+ * /api/auth/me existed from the start but nothing ever called it, so the app
+ * had no idea who was using it: the user menu said "Signed in" with no email,
+ * and every role-restricted action (registering a structure, the admin
+ * console) could only be discovered by trying it and reading a 403. This is
+ * the one place that answers "who am I".
+ *
+ * Never retried and never treated as an error state: an unauthenticated
+ * answer is a legitimate result, and middleware already handles the redirect.
+ */
+export function useSession() {
+  return useQuery<SessionUser | null>({
+    queryKey: queryKeys.session(),
+    queryFn: async () => {
+      const res = await fetch("/api/auth/me", { credentials: "same-origin" });
+      if (!res.ok) return null;
+      return (await res.json()) as SessionUser;
+    },
+    staleTime: 5 * 60_000,
+    retry: false,
   });
 }
 

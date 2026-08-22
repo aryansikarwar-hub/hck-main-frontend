@@ -1,11 +1,12 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, CircleSlash, Users as UsersIcon } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleSlash, ShieldAlert, Users as UsersIcon } from "lucide-react";
 import { Topbar } from "@/components/layout/Topbar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState, ErrorState, LoadingRows } from "@/components/common/QueryState";
-import { useMlStatus, useSetUserRole, useUsers } from "@/hooks/use-vigileye-data";
+import { useMlStatus, useSession, useSetUserRole, useUsers } from "@/hooks/use-vigileye-data";
+import type { ApiError } from "@/lib/api-client";
 import type { Role } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
@@ -35,6 +36,14 @@ export default function AdminPage() {
   const mlStatus = useMlStatus();
   const users = useUsers();
   const setUserRole = useSetUserRole();
+  const { data: session } = useSession();
+
+  // Two of the three cards here are role-gated at the API (`users` is
+  // admin-only, `mlStatus` excludes public-read), and the sidebar links
+  // everyone to this page. A bare "Couldn't load this data" for an engineer
+  // who is simply not an admin reads as a broken deployment.
+  const usersForbidden = (users.error as ApiError | null)?.status === 403;
+  const mlForbidden = (mlStatus.error as ApiError | null)?.status === 403;
 
   return (
     <>
@@ -50,6 +59,11 @@ export default function AdminPage() {
           <CardContent>
             {mlStatus.isLoading ? (
               <LoadingRows rows={2} />
+            ) : mlForbidden ? (
+              <RoleNotice
+                role={session?.role}
+                requirement="Inference-service status is visible to inspectors, engineers and admins — it exposes the service URL, so read-only accounts are excluded."
+              />
             ) : mlStatus.isError ? (
               <ErrorState message={(mlStatus.error as Error)?.message} onRetry={() => mlStatus.refetch()} />
             ) : mlStatus.data ? (
@@ -86,6 +100,11 @@ export default function AdminPage() {
           <CardContent>
             {users.isLoading ? (
               <LoadingRows rows={4} />
+            ) : usersForbidden ? (
+              <RoleNotice
+                role={session?.role}
+                requirement="Only an admin can list accounts or change roles. If you need a role changed, ask someone who already has the admin role — the bootstrap admin is set by the backend's BOOTSTRAP_ADMIN_EMAIL."
+              />
             ) : users.isError ? (
               <ErrorState message={(users.error as Error)?.message} onRetry={() => users.refetch()} />
             ) : !users.data?.length ? (
@@ -129,6 +148,23 @@ export default function AdminPage() {
         </Card>
       </div>
     </>
+  );
+}
+
+/** A refusal the user can understand, in place of a generic failed-fetch. */
+function RoleNotice({ role, requirement }: { role?: Role; requirement: string }) {
+  return (
+    <div className="flex items-start gap-2.5 rounded-md border border-severity-high/30 bg-severity-high/10 p-3 text-sm">
+      <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-severity-high" aria-hidden />
+      <p className="text-muted-foreground">
+        {role ? (
+          <>
+            Your account&apos;s role is <span className="font-medium capitalize text-foreground">{role}</span>.{" "}
+          </>
+        ) : null}
+        {requirement}
+      </p>
+    </div>
   );
 }
 

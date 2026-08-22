@@ -4,7 +4,6 @@ import { AnimatePresence } from "framer-motion";
 import type { Alert } from "@/lib/types";
 import { AlertCard } from "./AlertCard";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertTriangle } from "lucide-react";
 
 const SEVERITY_ORDER: Record<Alert["severity"], number> = { critical: 0, high: 1, medium: 2, low: 3 };
 
@@ -24,17 +23,14 @@ export function AlertInboxSkeleton() {
   );
 }
 
+/**
+ * Renders a non-empty list. The empty case belongs to the alerts page, which
+ * is the only caller that also knows whether anything is being monitored —
+ * this component used to answer it with "all monitored structures are within
+ * normal parameters", which is a safety claim it cannot make.
+ */
 export function AlertInbox({ alerts }: { alerts: Alert[] }) {
   const sorted = [...alerts].sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
-
-  if (sorted.length === 0) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-        <AlertTriangle className="h-8 w-8 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">No active alerts. All monitored structures are within normal parameters.</p>
-      </div>
-    );
-  }
 
   return (
     <div className="flex flex-col gap-2 overflow-y-auto p-4">

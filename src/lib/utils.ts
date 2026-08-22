@@ -58,17 +58,43 @@ export function severityLabel(value: unknown): string {
   return SEVERITY_LABEL[normalizeSeverity(value)];
 }
 
-export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", {
+/**
+ * Milliseconds for a timestamp, or null if there isn't one.
+ *
+ * Every date on the wire is a plain string the API happens to fill in, and
+ * nothing here validates it. `new Date(undefined).getTime()` is NaN, which
+ * propagated silently: the coverage page rendered "NaNd ago" and, worse, its
+ * staleness colouring fell through to the green "recently surveyed" bucket
+ * because `NaN > 60` is false. An unknown inspection date must never read as
+ * a recent one on a safety dashboard.
+ */
+function timeOf(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const ms = new Date(iso).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+export function formatDate(iso: string | null | undefined): string {
+  const ms = timeOf(iso);
+  if (ms === null) return "unknown date";
+  return new Date(ms).toLocaleDateString("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
   });
 }
 
-export function relativeTime(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const mins = Math.round(diffMs / 60000);
+/** Whole days between now and `iso`, or null when the date is missing/invalid. */
+export function daysSince(iso: string | null | undefined): number | null {
+  const ms = timeOf(iso);
+  return ms === null ? null : Math.round((Date.now() - ms) / (1000 * 60 * 60 * 24));
+}
+
+export function relativeTime(iso: string | null | undefined): string {
+  const ms = timeOf(iso);
+  if (ms === null) return "unknown";
+
+  const mins = Math.round((Date.now() - ms) / 60000);
   if (mins < 60) return `${mins}m ago`;
   const hours = Math.round(mins / 60);
   if (hours < 24) return `${hours}h ago`;

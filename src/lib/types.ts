@@ -15,12 +15,23 @@ export interface Structure {
   zoneId: string;
 }
 
+/**
+ * One crack instance, exactly as the API's Detection type defines it.
+ *
+ * Deliberately no more than that. This interface used to also carry
+ * `previousImageUrl`, `measurementSource`, and an `explanation` object with
+ * per-factor model confidence — none of which exist on the backend entity or
+ * in the GraphQL schema. They came from the deleted mock-data fixtures, and
+ * the components that read them (a before/after slider, a confidence
+ * breakdown panel) therefore rendered invented visuals for a detection that
+ * had no such data. Adding a field back here is only correct once the API
+ * actually returns it.
+ */
 export interface Detection {
   id: string;
   structureId: string;
   imageUrl: string;
   annotatedImageUrl: string;
-  previousImageUrl?: string; // most recent prior inspection's photo of the same location, for the before/after slider
   crackType: "diagonal" | "vertical" | "horizontal" | "map" | "hairline";
   widthMm: number;
   lengthCm: number;
@@ -29,38 +40,6 @@ export interface Detection {
   location: string; // e.g. "Pier 3, west face"
   capturedAt: string;
   capturedBy: "web" | "mobile" | "uav" | "fixed-camera";
-  measurementSource?: "segmentation" | "bbox-heuristic";
-  explanation?: DetectionExplanation;
-}
-
-/** "Explain this detection" — Feature: model confidence breakdown for non-ML reviewers. */
-export interface DetectionExplanation {
-  edgeDensity: number; // 0-1, how much edge/contrast activity the model found in the region
-  contrastDelta: number; // 0-1, local contrast vs. surrounding surface
-  textureAnomaly: number; // 0-1, deviation from the learned "normal concrete" texture
-  matchedTrainingPatterns: string[]; // human-readable descriptions of similar training examples
-  notes: string;
-}
-
-export interface SeverityMeasurement {
-  date: string;
-  widthMm: number;
-}
-
-export interface Forecast {
-  detectionId: string;
-  criticalThresholdMm: number;
-  projectedCriticalDate: string;
-  growthRateMmPerMonth: number;
-  confidence: "low" | "medium" | "high";
-}
-
-export interface RepairBrief {
-  detectionId: string;
-  summary: string;
-  recommendedAction: string;
-  recommendedTimeframeDays: number;
-  generatedAt: string;
 }
 
 export interface Alert {
@@ -85,15 +64,14 @@ export interface BudgetItem {
   projectedCriticalDate?: string;
 }
 
-/** Inspector coverage / leaderboard — field-inspector persona. */
-export interface Inspector {
-  id: string;
-  name: string;
-  surveysThisMonth: number;
-  structuresCovered: number;
-}
-
 export type Role = "inspector" | "engineer" | "admin" | "public-read";
+
+/** Whoever the access cookie belongs to — the shape /api/auth/me returns. */
+export interface SessionUser {
+  userId: string;
+  email: string;
+  role: Role;
+}
 
 export interface AccountUser {
   id: string;

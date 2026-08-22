@@ -86,9 +86,13 @@ function refreshSession(): Promise<boolean> {
   return refreshInFlight;
 }
 
-function authError(message: string, status: number): Error {
-  const err = new Error(message);
-  (err as Error & { status?: number }).status = status;
+export interface ApiError extends Error {
+  status?: number;
+}
+
+function apiError(message: string, status?: number): ApiError {
+  const err = new Error(message) as ApiError;
+  err.status = status;
   return err;
 }
 
@@ -100,11 +104,64 @@ function redirectToLogin(): void {
 }
 
 /**
+ * Turns a graphql-request failure into a clean message plus a real status.
+ *
+ * Two things make the raw error unusable, and both were surfacing straight
+ * into toasts and ErrorState:
+ *
+ * 1. `ClientError.message` is built as `"<server message>: " +
+ *    JSON.stringify({ response, request })` (see
+ *    graphql-request/build/legacy/classes/ClientError.js). Rendering
+ *    `error.message` therefore printed the entire query, every variable and
+ *    the whole response body into the UI. The real message is only the part
+ *    before that colon, so read `response.errors[0].message` instead.
+ *
+ * 2. `response.status` is NOT the authorization outcome. Nest's JwtAuthGuard
+ *    and RolesGuard throw inside the GraphQL execution context, and Apollo
+ *    Server reports resolver-level errors with HTTP 200 and
+ *    `extensions.code: "INTERNAL_SERVER_ERROR"` (see
+ *    @apollo/server errorNormalize.js — the code is only preserved for real
+ *    GraphQLErrors, which a Nest HttpException is not). So a 403 from
+ *    `@Roles("engineer","admin")` arrived here as a 200 and the 403 branch
+ *    below never ran. The status has to be recovered from Nest's message text.
+ */
+const NEST_FORBIDDEN = "forbidden resource";
+const NEST_UNAUTHORIZED_PREFIXES = ["unauthorized", "jwt expired", "invalid token", "user no longer exists"];
+
+function describeFailure(error: unknown): { message: string; status?: number } {
+  const response = (error as { response?: { status?: number; errors?: { message?: string }[] } })?.response;
+
+  if (!response) {
+    // Never reached the proxy at all (offline, DNS, aborted request).
+    return { message: "Could not reach the monitoring service. Check your connection and try again." };
+  }
+
+  const serverMessage = response.errors?.[0]?.message?.trim() ?? "";
+  const lower = serverMessage.toLowerCase();
+  const httpStatus = response.status;
+
+  let status = httpStatus && httpStatus !== 200 ? httpStatus : undefined;
+  if (!status) {
+    if (lower.startsWith(NEST_FORBIDDEN)) status = 403;
+    else if (NEST_UNAUTHORIZED_PREFIXES.some((p) => lower.startsWith(p))) status = 401;
+  }
+
+  return {
+    message: serverMessage || `The monitoring service returned an error (HTTP ${httpStatus ?? "unknown"}).`,
+    status,
+  };
+}
+
+/**
  * Thin wrapper that turns GraphQL/HTTP failures into something the query
  * layer can branch on (see Providers: 401/403 are never retried).
  *
  * A 401 triggers one silent refresh-and-retry before giving up, so a normally
  * expired access token is invisible to the user.
+ *
+ * Callers get an Error whose `message` is safe to render and whose `status`
+ * is the real one — 403 in particular, so a role failure can be explained
+ * instead of shown as a generic fetch error.
  */
 export async function gql<T>(
   query: string,
@@ -114,7 +171,7 @@ export async function gql<T>(
   try {
     return await getGqlClient().request<T>(query, variables);
   } catch (error) {
-    const status = (error as { response?: { status?: number } })?.response?.status;
+    const { message, status } = describeFailure(error);
 
     if (status === 401) {
       if (allowRefresh && (await refreshSession())) {
@@ -122,14 +179,18 @@ export async function gql<T>(
         return gql<T>(query, variables, { allowRefresh: false });
       }
       redirectToLogin();
-      throw authError("Your session has expired. Please sign in again.", 401);
+      throw apiError("Your session has expired. Please sign in again.", 401);
     }
 
     if (status === 403) {
-      throw authError("You don't have permission to view this.", 403);
+      // "Forbidden resource" is Nest's generic RolesGuard text and says
+      // nothing a user can act on; anything else came from a resolver that
+      // deliberately explained itself (e.g. the self-demote guard).
+      const isGeneric = message.toLowerCase().startsWith(NEST_FORBIDDEN);
+      throw apiError(isGeneric ? "Your account's role does not allow this." : message, 403);
     }
 
-    throw error;
+    throw apiError(message, status);
   }
 }
 

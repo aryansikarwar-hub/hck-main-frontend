@@ -9,6 +9,7 @@ import { Topbar } from "@/components/layout/Topbar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState, LoadingRows } from "@/components/common/QueryState";
+import { RegisterStructureDialog } from "@/components/structure/RegisterStructureDialog";
 import { useInvalidateAfterIngest, useStructures } from "@/hooks/use-vigileye-data";
 import { ingestImage, type IngestResult } from "@/lib/api-client";
 import type { Detection } from "@/lib/types";
@@ -123,7 +124,8 @@ export default function UploadPage() {
                 <EmptyState
                   icon={Building2}
                   title="No structures registered yet"
-                  description="An image can only be analysed against a registered structure. Register one first, then come back here."
+                  description="An image can only be analysed against a registered structure — the detection has to be attached to something. Register one and the picker above will fill in."
+                  action={<RegisterStructureDialog />}
                 />
               ) : (
                 <form onSubmit={handleSubmit} className="space-y-4">

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { LogOut, Loader2, UserCircle } from "lucide-react";
 import {
   DropdownMenu,
@@ -22,6 +23,7 @@ import { Button } from "@/components/ui/button";
 
 export function UserMenu({ email, role }: { email?: string; role?: string }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -29,6 +31,11 @@ export function UserMenu({ email, role }: { email?: string; role?: string }) {
     setSigningOut(true);
     try {
       await fetch("/api/auth/logout", { method: "POST" });
+      // Signing out is a client-side navigation, so nothing evicts the
+      // TanStack cache on its own: without this the next person to sign in on
+      // the same tab is served the previous account's session, structures and
+      // alerts until each key goes stale.
+      queryClient.clear();
       router.replace("/login");
       router.refresh();
     } finally {
@@ -48,10 +55,15 @@ export function UserMenu({ email, role }: { email?: string; role?: string }) {
         <DropdownMenuContent align="end" className="min-w-[13rem]">
           <DropdownMenuLabel>{email ?? "Signed in"}</DropdownMenuLabel>
           {role && (
-            <p className="px-2 pb-1.5 text-xs capitalize text-muted-foreground">{role}</p>
+            <p className="px-2 pb-1.5 text-xs capitalize text-muted-foreground">
+              {role} · role decides what you can change
+            </p>
           )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => router.push("/settings")}>Settings</DropdownMenuItem>
+          {/* A "Settings" item used to sit here pointing at /settings, which
+              has never existed — it 404'd every time. Roles, the only
+              per-account setting there is, live on /admin. */}
+          <DropdownMenuItem onClick={() => router.push("/admin")}>Admin console</DropdownMenuItem>
           <DropdownMenuItem onClick={() => setConfirmOpen(true)}>
             <LogOut className="h-4 w-4" />
             Sign out

@@ -2,11 +2,16 @@
 
 import { motion } from "framer-motion";
 import Link from "next/link";
+import { Check, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { useAcknowledgeAlert } from "@/hooks/use-vigileye-data";
 import type { Alert } from "@/lib/types";
 import { SEVERITY_COLOR_CLASS, SEVERITY_LABEL, cn, relativeTime } from "@/lib/utils";
 
 export function AlertCard({ alert }: { alert: Alert }) {
+  const acknowledge = useAcknowledgeAlert();
+
   return (
     <motion.div
       layout
@@ -27,7 +32,38 @@ export function AlertCard({ alert }: { alert: Alert }) {
               </div>
               <p className="mt-1 truncate text-sm text-muted-foreground">{alert.message}</p>
             </div>
-            <span className="shrink-0 text-xs text-muted-foreground">{relativeTime(alert.createdAt)}</span>
+
+            <div className="flex shrink-0 items-center gap-3">
+              {/*
+               * useAcknowledgeAlert and the acknowledgeAlert mutation both
+               * existed but nothing called them, so an alert could never be
+               * cleared from the app: the inbox grew forever and the budget
+               * simulator — which ranks exactly the UNacknowledged alerts —
+               * had no way to ever shrink. The card is a Link, hence the
+               * preventDefault: acknowledging must not navigate away.
+               */}
+              {alert.acknowledged ? (
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Check className="h-3.5 w-3.5" aria-hidden />
+                  Acknowledged
+                </span>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={acknowledge.isPending}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    acknowledge.mutate(alert.id);
+                  }}
+                >
+                  {acknowledge.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  Acknowledge
+                </Button>
+              )}
+              <span className="text-xs text-muted-foreground">{relativeTime(alert.createdAt)}</span>
+            </div>
           </CardContent>
         </Card>
       </Link>

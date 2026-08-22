@@ -6,15 +6,18 @@ import { MapPinOff, Users } from "lucide-react";
 import { Topbar } from "@/components/layout/Topbar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ErrorState, LoadingRows } from "@/components/common/QueryState";
+import { RegisterStructureDialog } from "@/components/structure/RegisterStructureDialog";
 import { useStructures } from "@/hooks/use-vigileye-data";
-import { cn, formatDate } from "@/lib/utils";
+import { cn, daysSince, formatDate } from "@/lib/utils";
 
-function daysSince(iso: string): number {
-  return Math.round((Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24));
-}
-
-function stalenessColor(days: number): string {
-  if (days > 60) return "bg-severity-critical/15 text-severity-critical border-severity-critical/30";
+/**
+ * An unknown last-inspected date is treated as the worst case, not the best.
+ * It previously fell through to the green "recent" bucket, because `daysSince`
+ * returned NaN and every `NaN > n` comparison is false — so a structure with
+ * no inspection record on file was shown as freshly surveyed.
+ */
+function stalenessColor(days: number | null): string {
+  if (days === null || days > 60) return "bg-severity-critical/15 text-severity-critical border-severity-critical/30";
   if (days > 30) return "bg-severity-medium/15 text-severity-medium border-severity-medium/30";
   return "bg-severity-low/15 text-severity-low border-severity-low/30";
 }
@@ -33,10 +36,13 @@ function stalenessColor(days: number): string {
 export default function CoveragePage() {
   const { data: structures, isLoading, isError, error, refetch } = useStructures();
 
-  const staleness = useMemo(
-    () => [...(structures ?? [])].sort((a, b) => daysSince(b.lastInspected) - daysSince(a.lastInspected)),
-    [structures]
-  );
+  // Sorted stalest-first, with unknown dates ahead of everything: they are the
+  // entries most in need of a visit, not the least. A finite sentinel rather
+  // than Infinity, so two unknowns compare equal instead of yielding NaN.
+  const staleness = useMemo(() => {
+    const rank = (iso: string) => daysSince(iso) ?? Number.MAX_SAFE_INTEGER;
+    return [...(structures ?? [])].sort((a, b) => rank(b.lastInspected) - rank(a.lastInspected));
+  }, [structures]);
 
   return (
     <>
@@ -51,6 +57,7 @@ export default function CoveragePage() {
             icon={MapPinOff}
             title="No structures registered yet"
             description="Survey staleness is calculated per structure. Register a structure to start tracking how long it has been since its last inspection."
+            action={<RegisterStructureDialog />}
           />
         ) : (
           <div className="space-y-6 p-6">
@@ -59,7 +66,8 @@ export default function CoveragePage() {
                 <CardTitle>Survey staleness</CardTitle>
                 <CardDescription>
                   Structures ranked by days since last inspection — the longer the gap, the higher the risk of an
-                  unnoticed crack
+                  unnoticed crack. A structure registered without an inspection date is dated from its
+                  registration, so a fresh &ldquo;0d&rdquo; here means recently added, not recently surveyed.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -80,7 +88,7 @@ export default function CoveragePage() {
                         </p>
                       </div>
                       <span className={cn("rounded-pill border px-2.5 py-0.5 text-xs font-medium", stalenessColor(days))}>
-                        {days}d ago
+                        {days === null ? "never surveyed" : `${days}d ago`}
                       </span>
                     </motion.div>
                   );
