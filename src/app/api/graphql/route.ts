@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { ACCESS_COOKIE, backendBaseUrl } from "@/lib/auth-cookies";
+import { ACCESS_COOKIE, assertNotSelfReferential, backendBaseUrl } from "@/lib/auth-cookies";
 
 /**
  * Authenticated GraphQL proxy. The browser calls this same-origin route; the
@@ -13,13 +13,36 @@ export async function POST(request: Request) {
     return NextResponse.json({ errors: [{ message: "Not authenticated" }] }, { status: 401 });
   }
 
+  let base: string;
+  try {
+    base = backendBaseUrl();
+    assertNotSelfReferential(base, request);
+  } catch (error) {
+    console.error("[graphql] API base URL misconfigured:", error);
+    return NextResponse.json(
+      { errors: [{ message: "Server is misconfigured — the API URL is not set correctly." }] },
+      { status: 500 }
+    );
+  }
+
   const body = await request.text();
-  const upstream = await fetch(`${backendBaseUrl()}/graphql`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body,
-    cache: "no-store",
-  });
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${base}/graphql`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body,
+      cache: "no-store",
+      signal: AbortSignal.timeout(25_000),
+    });
+  } catch (error) {
+    console.error("[graphql] upstream request failed:", error);
+    return NextResponse.json(
+      { errors: [{ message: "Could not reach the API. Please try again." }] },
+      { status: 502 }
+    );
+  }
 
   return new NextResponse(await upstream.text(), {
     status: upstream.status,

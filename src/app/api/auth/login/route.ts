@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
-import { backendBaseUrl, setAuthCookies } from "@/lib/auth-cookies";
+import { assertNotSelfReferential, backendBaseUrl, setAuthCookies } from "@/lib/auth-cookies";
+
+interface LoginResponse {
+  accessToken?: string;
+  refreshToken?: string;
+  user?: unknown;
+  error?: { message?: string };
+}
 
 /**
  * Backend-for-frontend login. The browser posts credentials here; this route
@@ -14,21 +21,62 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: { message: "Invalid request body" } }, { status: 400 });
   }
 
-  const upstream = await fetch(`${backendBaseUrl()}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: body.email, password: body.password }),
-    cache: "no-store",
-  });
+  let base: string;
+  try {
+    base = backendBaseUrl();
+    // A base that points back at this deployment would make the route call
+    // itself until the platform kills the recursion with a 508.
+    assertNotSelfReferential(base, request);
+  } catch (error) {
+    console.error("[auth/login] API base URL misconfigured:", error);
+    return NextResponse.json(
+      { error: { message: "Server is misconfigured — the API URL is not set correctly." } },
+      { status: 500 }
+    );
+  }
 
-  const data = await upstream.json().catch(() => ({}));
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${base}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: body.email, password: body.password }),
+      cache: "no-store",
+      // A sleeping free-tier backend can be slow to wake, but not forever.
+      signal: AbortSignal.timeout(25_000),
+    });
+  } catch (error) {
+    console.error("[auth/login] upstream request failed:", error);
+    return NextResponse.json(
+      { error: { message: "Could not reach the authentication service. Please try again." } },
+      { status: 502 }
+    );
+  }
+
+  const data: LoginResponse = await upstream.json().catch(() => ({}));
 
   if (!upstream.ok) {
-    // Pass the API's message through (it is deliberately generic for bad
-    // credentials) without leaking status details beyond what it chose.
+    // 4xx comes from the API and is meant for the user (bad credentials,
+    // locked account) — pass its message through. 5xx is our problem, not
+    // theirs: don't echo an opaque platform status like 508 to the browser.
+    if (upstream.status >= 500) {
+      console.error(`[auth/login] upstream ${upstream.status} from ${base}/api/auth/login`);
+      return NextResponse.json(
+        { error: { message: "The authentication service is unavailable. Please try again shortly." } },
+        { status: 502 }
+      );
+    }
     return NextResponse.json(
       { error: { message: data?.error?.message ?? "Login failed" } },
       { status: upstream.status }
+    );
+  }
+
+  if (!data.accessToken || !data.refreshToken) {
+    console.error("[auth/login] upstream returned 200 without tokens");
+    return NextResponse.json(
+      { error: { message: "Unexpected response from the authentication service." } },
+      { status: 502 }
     );
   }
 
