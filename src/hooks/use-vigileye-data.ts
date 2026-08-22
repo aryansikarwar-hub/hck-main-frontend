@@ -67,6 +67,24 @@ function normalizeAlert(a: Alert): Alert {
   return { ...a, severity: normalizeSeverity(a.severity) };
 }
 
+/**
+ * The mirror image of `lower()` above, for the outgoing direction.
+ *
+ * `registerEnumType` serialises a TypeScript enum by its KEY, so the
+ * StructureType enum's wire values are "BRIDGE" / "DAM" / "BUILDING" /
+ * "TUNNEL" even though this app's UI and types use the lowercase form
+ * ("bridge", "dam", ...). Sending the lowercase value straight through in a
+ * mutation variable fails validation with e.g. `Value "dam" does not exist
+ * in "StructureType" enum. Did you mean the enum value "DAM"?" — the enum
+ * type-checks the wire key, not the stored value.
+ *
+ * Hyphens become underscores for the same reason CaptureSource's
+ * "fixed-camera" value maps back to the "FIXED_CAMERA" key.
+ */
+function upper(value: string): string {
+  return value.toUpperCase().replace(/-/g, "_");
+}
+
 export function useStructures(filters: StructureFilters = {}) {
   return useQuery({
     queryKey: queryKeys.structures(filters),
@@ -180,9 +198,16 @@ export function useCreateStructure() {
 
   return useMutation({
     mutationFn: (input: CreateStructureInput) =>
-      gql<{ createStructure: Structure }>(MUTATIONS.createStructure, { input }).then((d) =>
-        normalizeStructure(d.createStructure)
-      ),
+      gql<{ createStructure: Structure }>(MUTATIONS.createStructure, {
+        // type (and riskLevel, if ever set from here) must go over the wire
+        // as the enum KEY ("DAM"), not the lowercase value ("dam") this
+        // app's forms and types use everywhere else. See upper() above.
+        input: {
+          ...input,
+          type: upper(input.type),
+          ...(input.riskLevel ? { riskLevel: upper(input.riskLevel) } : {}),
+        },
+      }).then((d) => normalizeStructure(d.createStructure)),
     onSuccess: (structure) => {
       queryClient.invalidateQueries({ queryKey: ["structures"] });
       toast.success(`${structure.name} is now being monitored`);
