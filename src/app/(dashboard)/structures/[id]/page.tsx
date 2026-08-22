@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { notFound } from "next/navigation";
+import { useMemo, useState } from "react";
+import { ScanSearch } from "lucide-react";
 import { Topbar } from "@/components/layout/Topbar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -10,28 +10,110 @@ import { SeverityTrendChart } from "@/components/structure/SeverityTrendChart";
 import { DetectionTimeline } from "@/components/structure/DetectionTimeline";
 import { BeforeAfterSlider } from "@/components/structure/BeforeAfterSlider";
 import { ExplanationPanel } from "@/components/structure/ExplanationPanel";
-import {
-  mockDetections,
-  mockForecasts,
-  mockRepairBriefs,
-  mockSeverityHistory,
-  mockStructures,
-} from "@/lib/mock-data";
+import { EmptyState, ErrorState, LoadingRows } from "@/components/common/QueryState";
+import { useStructure } from "@/hooks/use-vigileye-data";
 import type { Detection } from "@/lib/types";
 import { SEVERITY_COLOR_CLASS, SEVERITY_LABEL, cn, formatDate } from "@/lib/utils";
 
+/** Width at which a crack is treated as structurally critical. Engineering
+ *  constant, not data — kept here so the chart and the projection agree. */
+const CRITICAL_WIDTH_MM = 5;
+
+/** A projection, computed from this structure's own recorded measurements. */
+interface WidthProjection {
+  projectedCriticalDate: string;
+  growthRateMmPerMonth: number;
+  measurements: number;
+}
+
+/**
+ * Least-squares fit over the real measurement history, extrapolated to the
+ * critical threshold.
+ *
+ * This replaces the hardcoded `mockForecasts` table. It is honest about its
+ * own limits: it returns null with fewer than two measurements, and null when
+ * the crack is not actually growing — rather than inventing a date.
+ */
+function projectTimeToCritical(history: { date: string; widthMm: number }[]): WidthProjection | null {
+  if (history.length < 2) return null;
+
+  const points = history
+    .map((h) => ({ t: new Date(h.date).getTime(), w: h.widthMm }))
+    .filter((p) => Number.isFinite(p.t))
+    .sort((a, b) => a.t - b.t);
+  if (points.length < 2) return null;
+
+  const t0 = points[0].t;
+  const MONTH_MS = 1000 * 60 * 60 * 24 * 30;
+  const xs = points.map((p) => (p.t - t0) / MONTH_MS);
+  const ys = points.map((p) => p.w);
+
+  const meanX = xs.reduce((a, b) => a + b, 0) / xs.length;
+  const meanY = ys.reduce((a, b) => a + b, 0) / ys.length;
+  const denominator = xs.reduce((sum, x) => sum + (x - meanX) ** 2, 0);
+  if (denominator === 0) return null;
+
+  const slope = xs.reduce((sum, x, i) => sum + (x - meanX) * (ys[i] - meanY), 0) / denominator;
+  if (slope <= 0) return null; // stable or closing — no critical date to project
+
+  const latest = points[points.length - 1];
+  const monthsToCritical = (CRITICAL_WIDTH_MM - latest.w) / slope;
+  if (!Number.isFinite(monthsToCritical) || monthsToCritical < 0) return null;
+
+  return {
+    projectedCriticalDate: new Date(latest.t + monthsToCritical * MONTH_MS).toISOString(),
+    growthRateMmPerMonth: Math.round(slope * 100) / 100,
+    measurements: points.length,
+  };
+}
+
 export default function StructureDetailPage({ params }: { params: { id: string } }) {
-  // TODO: replace with useQuery(QUERIES.structureDetail, { id: params.id })
-  const structure = mockStructures.find((s) => s.id === params.id);
-  if (!structure) notFound();
-
-  const detections = mockDetections.filter((d) => d.structureId === structure.id);
-  const topDetection = detections[0];
-  const history = topDetection ? mockSeverityHistory[topDetection.id] : undefined;
-  const forecast = topDetection ? mockForecasts.find((f) => f.detectionId === topDetection.id) : undefined;
-  const brief = topDetection ? mockRepairBriefs.find((b) => b.detectionId === topDetection.id) : undefined;
-
+  const { data: structure, isLoading, isError, error, refetch } = useStructure(params.id);
   const [selected, setSelected] = useState<Detection | null>(null);
+
+  const detections = useMemo(
+    () =>
+      [...(structure?.detections ?? [])].sort(
+        (a, b) => new Date(b.capturedAt).getTime() - new Date(a.capturedAt).getTime()
+      ),
+    [structure]
+  );
+
+  // Trend + projection come from the structure's own recorded detections.
+  const history = useMemo(
+    () =>
+      [...detections]
+        .reverse()
+        .map((d) => ({ date: d.capturedAt, widthMm: d.widthMm })),
+    [detections]
+  );
+
+  const projection = useMemo(() => projectTimeToCritical(history), [history]);
+
+  if (isLoading) {
+    return (
+      <>
+        <Topbar title="Structure" />
+        <div className="min-h-0 flex-1">
+          <LoadingRows rows={4} />
+        </div>
+      </>
+    );
+  }
+
+  if (isError || !structure) {
+    return (
+      <>
+        <Topbar title="Structure" />
+        <div className="min-h-0 flex-1">
+          <ErrorState
+            message={(error as Error)?.message ?? "This structure could not be loaded."}
+            onRetry={() => refetch()}
+          />
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -57,14 +139,17 @@ export default function StructureDetailPage({ params }: { params: { id: string }
                 <CardHeader>
                   <CardTitle>Severity trend</CardTitle>
                   <CardDescription>
-                    Crack width over time{topDetection ? ` — ${topDetection.location}` : ""}
+                    Measured crack width across {history.length} recorded inspection
+                    {history.length === 1 ? "" : "s"}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {history ? (
-                    <SeverityTrendChart history={history} criticalThresholdMm={forecast?.criticalThresholdMm} />
+                  {history.length >= 2 ? (
+                    <SeverityTrendChart history={history} criticalThresholdMm={CRITICAL_WIDTH_MM} />
                   ) : (
-                    <p className="text-sm text-muted-foreground">No historical measurements yet for this structure.</p>
+                    <p className="text-sm text-muted-foreground">
+                      At least two inspections of this structure are needed before a trend can be plotted.
+                    </p>
                   )}
                 </CardContent>
               </Card>
@@ -72,43 +157,44 @@ export default function StructureDetailPage({ params }: { params: { id: string }
               <Card>
                 <CardHeader>
                   <CardTitle>Time-to-critical forecast</CardTitle>
-                  <CardDescription>Feature 1 — predictive risk forecasting</CardDescription>
+                  <CardDescription>Linear projection from recorded measurements</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {forecast ? (
+                  {projection ? (
                     <div className="space-y-2">
-                      <p className="text-2xl font-semibold text-primary">{formatDate(forecast.projectedCriticalDate)}</p>
-                      <p className="text-sm text-muted-foreground">
-                        Projected to cross the {forecast.criticalThresholdMm}mm critical threshold at a growth rate of{" "}
-                        {forecast.growthRateMmPerMonth}mm/month.
+                      <p className="text-2xl font-semibold text-primary">
+                        {formatDate(projection.projectedCriticalDate)}
                       </p>
-                      <span className="eyebrow">{forecast.confidence} confidence</span>
+                      <p className="text-sm text-muted-foreground">
+                        Projected to cross the {CRITICAL_WIDTH_MM}mm critical threshold at the observed growth rate of{" "}
+                        {projection.growthRateMmPerMonth}mm/month.
+                      </p>
+                      <span className="eyebrow">
+                        fitted on {projection.measurements} measurement{projection.measurements === 1 ? "" : "s"}
+                      </span>
                     </div>
                   ) : (
-                    <p className="text-sm text-muted-foreground">Not enough repeated measurements to forecast yet.</p>
+                    <p className="text-sm text-muted-foreground">
+                      {history.length < 2
+                        ? "Not enough repeated measurements to forecast yet."
+                        : "No measurable growth across the recorded inspections — nothing to project."}
+                    </p>
                   )}
                 </CardContent>
               </Card>
             </div>
-
-            {brief && (
-              <Card className="mt-6 border-primary/40">
-                <CardHeader>
-                  <CardTitle>AI-generated repair brief</CardTitle>
-                  <CardDescription>Feature 3 — plain-language, non-technical summary</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <p className="text-sm">{brief.summary}</p>
-                  <p className="text-sm font-medium">
-                    Recommended: {brief.recommendedAction} within {brief.recommendedTimeframeDays} days
-                  </p>
-                </CardContent>
-              </Card>
-            )}
           </TabsContent>
 
           <TabsContent value="detections">
-            <DetectionTimeline detections={detections} onSelect={setSelected} />
+            {detections.length === 0 ? (
+              <EmptyState
+                icon={ScanSearch}
+                title="No detections recorded"
+                description="Upload an inspection image for this structure and any cracks the model finds will appear here."
+              />
+            ) : (
+              <DetectionTimeline detections={detections} onSelect={setSelected} />
+            )}
           </TabsContent>
         </Tabs>
       </div>
