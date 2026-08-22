@@ -18,6 +18,11 @@ export type MapView = "pins" | "heatmap";
 const HEATMAP_SOURCE_ID = "zone-risk-source";
 const HEATMAP_LAYER_ID = "zone-risk-heat";
 
+/** How close two coordinates need to be to count as "the same pin", for
+ *  matching `focusLocation` back to the marker it refers to. Loose enough to
+ *  absorb the toFixed(6) rounding a freshly-created structure goes through. */
+const SAME_PIN_EPSILON = 1e-4;
+
 /**
  * Live structure map. Uses Mapbox GL JS when NEXT_PUBLIC_MAPBOX_TOKEN is set
  * (production behavior — risk-colored pins with clustering per the PRD).
@@ -27,15 +32,22 @@ const HEATMAP_LAYER_ID = "zone-risk-heat";
  * `view="heatmap"` switches to an aggregate zone-level risk view (a city-wide
  * "where should I be worried" read, vs. per-structure pins) — a Mapbox GL
  * heatmap layer when live, a colored zone-tile grid in the fallback.
+ *
+ * `focusLocation` flies the camera to a specific coordinate and pops its
+ * marker open once the map is ready — used right after registering a new
+ * structure, so the map doesn't just silently grow a new pin somewhere
+ * off-screen while the camera stays wherever it happened to be.
  */
 export function StructureMap({
   structures,
   zones,
   view = "pins",
+  focusLocation,
 }: {
   structures: Structure[];
   zones?: ZoneRisk[];
   view?: MapView;
+  focusLocation?: { lat: number; lng: number } | null;
 }) {
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -47,6 +59,7 @@ export function StructureMap({
     let map: import("mapbox-gl").Map | undefined;
     let cancelled = false;
     const markers: import("mapbox-gl").Marker[] = [];
+    let focusMarker: import("mapbox-gl").Marker | undefined;
 
     import("mapbox-gl")
       .then((mapboxgl) => {
@@ -130,7 +143,23 @@ export function StructureMap({
               .setPopup(new mapboxgl.default.Popup({ offset: 12 }).setHTML(`<strong>${s.name}</strong>`))
               .addTo(map!);
             markers.push(marker);
+
+            if (
+              focusLocation &&
+              Math.abs(s.lat - focusLocation.lat) < SAME_PIN_EPSILON &&
+              Math.abs(s.lng - focusLocation.lng) < SAME_PIN_EPSILON
+            ) {
+              focusMarker = marker;
+            }
           });
+
+          // Fly to the just-registered structure and pop its marker open,
+          // rather than leaving the camera wherever it was — a new pin
+          // outside the current viewport would otherwise be invisible.
+          if (focusLocation) {
+            map.flyTo({ center: [focusLocation.lng, focusLocation.lat], zoom: 15, essential: true });
+            focusMarker?.togglePopup();
+          }
         });
       })
       .catch(() => setMapFailed(true));
@@ -140,7 +169,7 @@ export function StructureMap({
       markers.forEach((m) => m.remove());
       map?.remove();
     };
-  }, [token, structures, zones, view]);
+  }, [token, structures, zones, view, focusLocation]);
 
   if (mapFailed) {
     return view === "heatmap" && zones ? (
