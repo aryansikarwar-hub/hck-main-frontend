@@ -4,12 +4,23 @@
 
 import { GraphQLClient } from "graphql-request";
 
-const endpoint = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/graphql";
+const endpoint =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/graphql";
 
 export const gqlClient = new GraphQLClient(endpoint, {
-  headers: () => {
-    const token = typeof window !== "undefined" ? localStorage.getItem("cs_token") : null;
-    return token ? { Authorization: `Bearer ${token}` } : {};
+  headers: (): Record<string, string> => {
+    const token =
+      typeof window !== "undefined"
+        ? localStorage.getItem("cs_token")
+        : null;
+
+    if (token) {
+      return {
+        Authorization: `Bearer ${token}`,
+      };
+    }
+
+    return {};
   },
 });
 
@@ -17,6 +28,7 @@ export const USE_MOCKS = !process.env.NEXT_PUBLIC_API_URL;
 
 // Example query shapes the backend's GraphQL schema is expected to expose.
 // Keep these in sync with backend/src/**/schema additions.
+
 export const QUERIES = {
   structures: /* GraphQL */ `
     query Structures {
@@ -32,6 +44,7 @@ export const QUERIES = {
       }
     }
   `,
+
   alerts: /* GraphQL */ `
     query Alerts {
       alerts {
@@ -46,6 +59,7 @@ export const QUERIES = {
       }
     }
   `,
+
   structureDetail: /* GraphQL */ `
     query StructureDetail($id: ID!) {
       structure(id: $id) {
