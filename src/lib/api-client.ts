@@ -18,22 +18,50 @@ import type { Detection } from "@/lib/types";
 export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/graphql\/?$/, "").replace(/\/+$/, "");
 export const IS_API_CONFIGURED = API_BASE_URL.length > 0;
 
+/** Same-origin proxy route that adds the bearer token server-side. */
+const GRAPHQL_PATH = "/api/graphql";
+
+let client: GraphQLClient | null = null;
+
 /**
  * All GraphQL traffic goes through the same-origin /api/graphql proxy, which
  * attaches the bearer token server-side from the httpOnly cookie. The browser
  * therefore never holds a credential, and there is no Authorization header to
  * construct here.
+ *
+ * The client is built lazily with an ABSOLUTE url. graphql-request v7 runs
+ * `new URL(params.url)` on every request (build/legacy/helpers/runRequest.js),
+ * and that constructor rejects a bare path — passing "/api/graphql" throws
+ * `Failed to construct 'URL': Invalid URL` before a single request leaves the
+ * browser, which surfaced as "Couldn't load this data" on every dashboard
+ * page. Resolving against window.location.origin keeps the request
+ * same-origin while giving the library the absolute url it requires.
+ *
+ * Lazy, not module-scope, because `window` does not exist while Next
+ * prerenders these pages at build time.
  */
-export const gqlClient = new GraphQLClient("/api/graphql", {
-  // Cookies are same-origin to the proxy route.
-  credentials: "same-origin",
-});
+export function getGqlClient(): GraphQLClient {
+  if (client) return client;
+
+  const endpoint =
+    typeof window === "undefined"
+      ? // Never actually used: every caller is a client component. Present
+        // only so module evaluation during prerender cannot throw.
+        `http://localhost${GRAPHQL_PATH}`
+      : new URL(GRAPHQL_PATH, window.location.origin).toString();
+
+  client = new GraphQLClient(endpoint, {
+    // Cookies are same-origin to the proxy route.
+    credentials: "same-origin",
+  });
+  return client;
+}
 
 /** Thin wrapper that turns GraphQL/HTTP failures into something the query
  *  layer can branch on (see Providers: 401/403 are never retried). */
 export async function gql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
   try {
-    return await gqlClient.request<T>(query, variables);
+    return await getGqlClient().request<T>(query, variables);
   } catch (error) {
     const status = (error as { response?: { status?: number } })?.response?.status;
     if (status === 401) {
