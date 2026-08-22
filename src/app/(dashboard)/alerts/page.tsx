@@ -1,26 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { ShieldCheck } from "lucide-react";
 import { Topbar } from "@/components/layout/Topbar";
-import { AlertInbox, AlertInboxSkeleton } from "@/components/alerts/AlertInbox";
-import { mockAlerts } from "@/lib/mock-data";
-import type { Alert } from "@/lib/types";
+import { AlertInbox } from "@/components/alerts/AlertInbox";
+import { EmptyState, ErrorState, LoadingRows } from "@/components/common/QueryState";
+import { useAlerts } from "@/hooks/use-vigileye-data";
 
 export default function AlertsPage() {
-  // TODO: replace with useQuery(QUERIES.alerts) + a WebSocket subscription to
-  // severity-alerts (see backend/) for live inbox updates once wired up.
-  const [alerts, setAlerts] = useState<Alert[] | null>(null);
-
-  useEffect(() => {
-    const t = setTimeout(() => setAlerts(mockAlerts), 500);
-    return () => clearTimeout(t);
-  }, []);
+  const { data, isLoading, isError, error, refetch } = useAlerts();
 
   return (
     <>
       <Topbar title="Alert Inbox" />
       <div className="min-h-0 flex-1">
-        {alerts === null ? <AlertInboxSkeleton /> : <AlertInbox alerts={alerts} />}
+        {isLoading ? (
+          <LoadingRows />
+        ) : isError ? (
+          <ErrorState message={(error as Error)?.message} onRetry={() => refetch()} />
+        ) : !data || data.items.length === 0 ? (
+          <EmptyState
+            icon={ShieldCheck}
+            title="No active alerts"
+            description="Every monitored structure is currently within normal parameters. Alerts appear here the moment a detection crosses a severity threshold."
+          />
+        ) : (
+          <AlertInbox alerts={data.items} />
+        )}
       </div>
     </>
   );
