@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -151,6 +152,13 @@ export default function LoginPage() {
             </Suspense>
           </CardContent>
         </Card>
+
+        <p className="mt-4 text-center text-sm text-muted-foreground">
+          Don&apos;t have an account?{" "}
+          <Link href="/signup" className="text-primary hover:underline">
+            Create one
+          </Link>
+        </p>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
           © {new Date().getFullYear()} VigilEye AI ·{" "}
