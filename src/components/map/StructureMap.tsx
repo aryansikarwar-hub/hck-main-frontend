@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import type { Structure, ZoneRisk } from "@/lib/types";
-import { SEVERITY_COLOR_CLASS, SEVERITY_LABEL, cn } from "@/lib/utils";
+import { cn, normalizeSeverity, severityBgClass, severityClasses, severityLabel, severityTextClass } from "@/lib/utils";
 import Link from "next/link";
 
 const SEVERITY_HEX: Record<Structure["riskLevel"], string> = {
@@ -110,7 +110,7 @@ export function StructureMap({
             if (s.riskLevel === "critical" || s.riskLevel === "high") {
               const pulse = document.createElement("div");
               pulse.className = "map-pin-pulse";
-              pulse.style.color = SEVERITY_HEX[s.riskLevel];
+              pulse.style.color = SEVERITY_HEX[normalizeSeverity(s.riskLevel)];
               pulse.style.background = "currentColor";
               wrapper.appendChild(pulse);
             }
@@ -121,7 +121,7 @@ export function StructureMap({
             dot.style.borderRadius = "50%";
             dot.style.border = "2px solid white";
             dot.style.boxShadow = "0 0 0 1px rgba(0,0,0,0.15)";
-            dot.style.background = SEVERITY_HEX[s.riskLevel];
+            dot.style.background = SEVERITY_HEX[normalizeSeverity(s.riskLevel)];
             dot.style.position = "relative";
             wrapper.appendChild(dot);
 
@@ -207,9 +207,9 @@ function StructureGridFallback({ structures }: { structures: Structure[] }) {
             <div className="flex items-center gap-3">
               <span className="relative flex h-2.5 w-2.5">
                 {(s.riskLevel === "critical" || s.riskLevel === "high") && (
-                  <span className={cn("map-pin-pulse", SEVERITY_COLOR_CLASS[s.riskLevel].split(" ")[1])} style={{ background: "currentColor" }} />
+                  <span className={cn("map-pin-pulse", severityTextClass(s.riskLevel))} style={{ background: "currentColor" }} />
                 )}
-                <span className={cn("h-2.5 w-2.5 rounded-full", SEVERITY_COLOR_CLASS[s.riskLevel].split(" ")[1]?.replace("text-", "bg-"))} />
+                <span className={cn("h-2.5 w-2.5 rounded-full", severityBgClass(s.riskLevel))} />
               </span>
               <div>
                 <p className="text-sm font-medium">{s.name}</p>
@@ -221,10 +221,10 @@ function StructureGridFallback({ structures }: { structures: Structure[] }) {
             <span
               className={cn(
                 "rounded-pill border px-2 py-0.5 text-xs font-medium",
-                SEVERITY_COLOR_CLASS[s.riskLevel]
+                severityClasses(s.riskLevel)
               )}
             >
-              {SEVERITY_LABEL[s.riskLevel]}
+              {severityLabel(s.riskLevel)}
             </span>
           </Link>
         </motion.div>
