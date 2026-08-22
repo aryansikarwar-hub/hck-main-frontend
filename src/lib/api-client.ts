@@ -14,13 +14,13 @@ export const gqlClient = new GraphQLClient(endpoint, {
         ? localStorage.getItem("cs_token")
         : null;
 
-    if (token) {
-      return {
-        Authorization: `Bearer ${token}`,
-      };
+    if (!token) {
+      return {};
     }
 
-    return {};
+    return {
+      Authorization: `Bearer ${token}`,
+    };
   },
 });
 
