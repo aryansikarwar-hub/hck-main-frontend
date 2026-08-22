@@ -88,9 +88,14 @@ export interface AccountUser {
  * invented recall figures. Every field here comes from the live service, so
  * the page can only show what is actually loaded.
  */
+/** Which detector answers /predict — see ml-model/service/heuristic.py. */
+export type MlEngine = "onnx" | "opencv-heuristic" | "none";
+
 export interface MlStatus {
   reachable: boolean;
+  /** Trained ONNX weights specifically. False no longer means uploads fail — read `engine`. */
   modelLoaded: boolean;
+  engine: MlEngine;
   modelVersion: string | null;
   serviceUrl: string;
   detail: string | null;

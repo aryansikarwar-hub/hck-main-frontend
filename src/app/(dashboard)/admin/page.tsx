@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState, ErrorState, LoadingRows } from "@/components/common/QueryState";
 import { useMlStatus, useSession, useSetUserRole, useUsers } from "@/hooks/use-vigileye-data";
 import type { ApiError } from "@/lib/api-client";
-import type { Role } from "@/lib/types";
+import type { MlEngine, MlStatus, Role } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
 const ROLES: { value: Role; label: string; access: string }[] = [
@@ -168,16 +168,28 @@ function RoleNotice({ role, requirement }: { role?: Role; requirement: string })
   );
 }
 
+/** Plain-language names — "onnx" means nothing to a safety officer. */
+const ENGINE_LABEL: Record<MlEngine, string> = {
+  onnx: "Trained model (ONNX)",
+  "opencv-heuristic": "Classical CV fallback",
+  none: "None",
+};
+
 function ModelStatusPanel({
   status,
 }: {
-  status: { reachable: boolean; modelLoaded: boolean; modelVersion: string | null; serviceUrl: string; detail: string | null };
+  status: MlStatus;
 }) {
+  // Three states, not two. "No trained model" and "nothing will answer an
+  // upload" used to be the same thing; the classical-CV fallback separates
+  // them, and telling a working service it is broken is its own kind of lie.
   const state = !status.reachable
     ? { icon: CircleSlash, label: "Unreachable", tone: "text-severity-critical" }
     : status.modelLoaded
       ? { icon: CheckCircle2, label: "Ready", tone: "text-severity-low" }
-      : { icon: AlertTriangle, label: "No model loaded", tone: "text-severity-high" };
+      : status.engine === "opencv-heuristic"
+        ? { icon: AlertTriangle, label: "Fallback detector", tone: "text-severity-medium" }
+        : { icon: AlertTriangle, label: "No model loaded", tone: "text-severity-high" };
 
   const Icon = state.icon;
 
@@ -191,6 +203,8 @@ function ModelStatusPanel({
       <dl className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-sm">
         <dt className="text-muted-foreground">Model version</dt>
         <dd>{status.modelVersion ?? "—"}</dd>
+        <dt className="text-muted-foreground">Detector</dt>
+        <dd>{ENGINE_LABEL[status.engine] ?? status.engine}</dd>
         <dt className="text-muted-foreground">Service</dt>
         <dd className="break-all font-mono text-xs">{status.serviceUrl}</dd>
       </dl>
@@ -203,8 +217,11 @@ function ModelStatusPanel({
 
       {status.reachable && !status.modelLoaded && (
         <p className="text-xs text-muted-foreground">
-          Uploads will be rejected until weights are loaded. There are no accuracy figures to show because no
-          evaluated model exists yet — see <span className="font-mono">ml-model/ACCURACY.md</span>.
+          {status.engine === "opencv-heuristic"
+            ? "Uploads are analysed, but by shape and contrast rather than a trained model — treat the results as indicative and verify them on site."
+            : "Uploads will be rejected until weights are loaded."}{" "}
+          There are no accuracy figures to show because no evaluated model exists yet — see{" "}
+          <span className="font-mono">ml-model/ACCURACY.md</span>.
         </p>
       )}
     </div>

@@ -240,6 +240,7 @@ export const QUERIES = {
       mlStatus {
         reachable
         modelLoaded
+        engine
         modelVersion
         serviceUrl
         detail
