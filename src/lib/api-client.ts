@@ -170,6 +170,34 @@ export const QUERIES = {
     }
   `,
 
+  /**
+   * Live state of the inference service, for the admin page. Replaces a
+   * hardcoded table of model versions whose recall figures were invented.
+   */
+  mlStatus: /* GraphQL */ `
+    query MlStatus {
+      mlStatus {
+        reachable
+        modelLoaded
+        modelVersion
+        serviceUrl
+        detail
+      }
+    }
+  `,
+
+  users: /* GraphQL */ `
+    query Users {
+      users {
+        id
+        email
+        name
+        role
+        createdAt
+      }
+    }
+  `,
+
   structureDetail: /* GraphQL */ `
     query StructureDetail($id: ID!) {
       structure(id: $id) {
@@ -257,12 +285,56 @@ export async function ingestImage(
   return payload;
 }
 
+/** Fields shared by every mutation that returns a Structure. */
+const STRUCTURE_FIELDS = /* GraphQL */ `
+  id
+  name
+  type
+  lat
+  lng
+  riskLevel
+  lastInspected
+  activeDetections
+  criticalityWeight
+  zoneId
+`;
+
 export const MUTATIONS = {
   acknowledgeAlert: /* GraphQL */ `
     mutation AcknowledgeAlert($id: ID!) {
       acknowledgeAlert(id: $id) {
         id
         acknowledged
+      }
+    }
+  `,
+
+  createStructure: /* GraphQL */ `
+    mutation CreateStructure($input: CreateStructureInput!) {
+      createStructure(input: $input) { ${STRUCTURE_FIELDS} }
+    }
+  `,
+
+  updateStructure: /* GraphQL */ `
+    mutation UpdateStructure($id: ID!, $input: UpdateStructureInput!) {
+      updateStructure(id: $id, input: $input) { ${STRUCTURE_FIELDS} }
+    }
+  `,
+
+  deleteStructure: /* GraphQL */ `
+    mutation DeleteStructure($id: ID!) {
+      deleteStructure(id: $id)
+    }
+  `,
+
+  setUserRole: /* GraphQL */ `
+    mutation SetUserRole($id: ID!, $role: String!) {
+      setUserRole(id: $id, role: $role) {
+        id
+        email
+        name
+        role
+        createdAt
       }
     }
   `,

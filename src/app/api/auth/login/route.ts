@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { assertNotSelfReferential, backendBaseUrl, setAuthCookies } from "@/lib/auth-cookies";
+import { assertNotSelfReferential, backendBaseUrl, clientIpHeaders, setAuthCookies } from "@/lib/auth-cookies";
 
 interface LoginResponse {
   accessToken?: string;
@@ -39,7 +39,12 @@ export async function POST(request: Request) {
   try {
     upstream = await fetch(`${base}/api/auth/login`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        // Without this the backend's per-IP lockout counts every user's
+        // failed attempts against one shared bucket.
+        ...clientIpHeaders(request),
+      },
       body: JSON.stringify({ email: body.email, password: body.password }),
       cache: "no-store",
       // A sleeping free-tier backend can be slow to wake, but not forever.

@@ -66,6 +66,25 @@ export function backendBaseUrl(): string {
   return raw.trim().replace(/\/+$/, "").replace(/\/graphql$/, "");
 }
 
+/** Must match the backend's CLIENT_IP_HEADER (common/gql-throttler.guard.ts). */
+const CLIENT_IP_HEADER = "x-vigileye-client-ip";
+
+/**
+ * Headers to send upstream so the API can rate-limit per browser.
+ *
+ * Every auth call is proxied server-side, so from the backend's point of view
+ * all of them originate at this deployment's egress IP. Its per-IP throttles
+ * then applied to all users at once — signup died after five accounts total.
+ * Forwarding the caller's address restores per-user bucketing.
+ */
+export function clientIpHeaders(request: Request): Record<string, string> {
+  const forwarded = request.headers.get("x-forwarded-for");
+  // First hop is the client; the rest are proxies that appended themselves.
+  const clientIp = forwarded?.split(",")[0]?.trim() || request.headers.get("x-real-ip");
+
+  return clientIp ? { [CLIENT_IP_HEADER]: clientIp } : {};
+}
+
 /**
  * Guards against the API base pointing back at this same deployment.
  *

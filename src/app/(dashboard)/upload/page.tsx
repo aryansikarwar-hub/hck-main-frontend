@@ -9,7 +9,7 @@ import { Topbar } from "@/components/layout/Topbar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState, LoadingRows } from "@/components/common/QueryState";
-import { useStructures } from "@/hooks/use-vigileye-data";
+import { useInvalidateAfterIngest, useStructures } from "@/hooks/use-vigileye-data";
 import { ingestImage, type IngestResult } from "@/lib/api-client";
 import type { Detection } from "@/lib/types";
 import { SEVERITY_COLOR_CLASS, SEVERITY_LABEL, cn } from "@/lib/utils";
@@ -41,6 +41,7 @@ function DetectionRow({ detection }: { detection: Detection }) {
 
 export default function UploadPage() {
   const { data: structures, isLoading, isError, error, refetch } = useStructures();
+  const invalidateAfterIngest = useInvalidateAfterIngest();
 
   const [file, setFile] = useState<File | null>(null);
   const [structureId, setStructureId] = useState("");
@@ -87,6 +88,11 @@ export default function UploadPage() {
       setResult(data);
       setStatus("done");
       setFile(null);
+      // The upload wrote detections, changed the structure's risk level and
+      // detection count, and may have raised an alert. Without this the
+      // structure page serves its cached pre-upload copy for another 30s and
+      // the new detection looks lost.
+      invalidateAfterIngest(structureId);
     } catch {
       // The toast above already surfaced the message; just let the user retry.
       setStatus("idle");

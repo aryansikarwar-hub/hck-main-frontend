@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { ACCESS_COOKIE, assertNotSelfReferential, backendBaseUrl } from "@/lib/auth-cookies";
+import { ACCESS_COOKIE, assertNotSelfReferential, backendBaseUrl, clientIpHeaders } from "@/lib/auth-cookies";
 
 /**
  * Authenticated GraphQL proxy. The browser calls this same-origin route; the
@@ -31,7 +31,13 @@ export async function POST(request: Request) {
   try {
     upstream = await fetch(`${base}/graphql`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        // The API's baseline 100-req/min throttle applies per client, and
+        // every request here arrives from this deployment's egress IP.
+        ...clientIpHeaders(request),
+      },
       body,
       cache: "no-store",
       signal: AbortSignal.timeout(25_000),

@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { ACCESS_COOKIE, backendBaseUrl } from "@/lib/auth-cookies";
+import { ACCESS_COOKIE, backendBaseUrl, clientIpHeaders } from "@/lib/auth-cookies";
 
 /**
  * Authenticated ingestion proxy.
@@ -48,6 +48,7 @@ export async function POST(request: Request, { params }: { params: { structureId
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": contentType,
+        ...clientIpHeaders(request),
       },
       body,
       cache: "no-store",

@@ -6,6 +6,7 @@ import { Topbar } from "@/components/layout/Topbar";
 import { StructureMap, type MapView } from "@/components/map/StructureMap";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState, ErrorState, LoadingRows } from "@/components/common/QueryState";
+import { RegisterStructureDialog } from "@/components/structure/RegisterStructureDialog";
 import { useStructures } from "@/hooks/use-vigileye-data";
 import type { ZoneRisk } from "@/lib/types";
 
@@ -52,13 +53,14 @@ export default function MapPage() {
   return (
     <>
       <Topbar title="Live Structure Map" />
-      <div className="flex items-center justify-end border-b border-border/30 px-4 py-2 md:px-6">
+      <div className="flex items-center justify-end gap-3 border-b border-border/30 px-4 py-2 md:px-6">
         <Tabs value={view} onValueChange={(v) => setView(v as MapView)}>
           <TabsList>
             <TabsTrigger value="pins">Structures</TabsTrigger>
             <TabsTrigger value="heatmap">Risk heatmap</TabsTrigger>
           </TabsList>
         </Tabs>
+        <RegisterStructureDialog />
       </div>
       <div className="min-h-0 flex-1">
         {isLoading ? (
@@ -66,11 +68,17 @@ export default function MapPage() {
         ) : isError ? (
           <ErrorState message={(error as Error)?.message} onRetry={() => refetch()} />
         ) : !structures || structures.length === 0 ? (
-          <EmptyState
-            icon={MapPinOff}
-            title="No structures registered yet"
-            description="Add a bridge, dam, building or tunnel to begin monitoring it. Structures appear on the map as soon as they're registered."
-          />
+          <div className="flex h-full flex-col items-center justify-center gap-4">
+            <EmptyState
+              icon={MapPinOff}
+              title="No structures registered yet"
+              description="Add a bridge, dam, building or tunnel to begin monitoring it. Structures appear on the map as soon as they're registered."
+            />
+            {/* Without this the empty state is a dead end: the only other
+                trigger sits in the toolbar above, which reads as a filter
+                control rather than the way forward. */}
+            <RegisterStructureDialog />
+          </div>
         ) : (
           <StructureMap structures={structures} zones={zones} view={view} />
         )}

@@ -3,13 +3,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { MUTATIONS, QUERIES, gql } from "@/lib/api-client";
-import type { Alert, Detection, Structure } from "@/lib/types";
+import type { AccountUser, Alert, Detection, MlStatus, Role, Structure } from "@/lib/types";
 import { normalizeSeverity } from "@/lib/utils";
 
 export const queryKeys = {
   structures: (filters?: StructureFilters) => ["structures", filters ?? {}] as const,
   structure: (id: string) => ["structure", id] as const,
   alerts: (limit: number, offset: number) => ["alerts", limit, offset] as const,
+  mlStatus: () => ["ml-status"] as const,
+  users: () => ["users"] as const,
 };
 
 export interface StructureFilters {
@@ -115,6 +117,107 @@ export function useAcknowledgeAlert() {
     },
     onError: (error: Error) => {
       toast.error(error.message || "Could not acknowledge the alert");
+    },
+  });
+}
+
+/**
+ * Everything an ingest changes.
+ *
+ * A successful upload writes detection rows, bumps the structure's risk level
+ * and detection count, and can raise an alert — but nothing invalidated the
+ * caches holding the old values. With `staleTime: 30_000` (see Providers),
+ * opening the structure page right after an upload showed the pre-upload data
+ * and looked like the analysis had been thrown away.
+ */
+export function useInvalidateAfterIngest() {
+  const queryClient = useQueryClient();
+
+  return (structureId: string) => {
+    queryClient.invalidateQueries({ queryKey: ["structures"] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.structure(structureId) });
+    queryClient.invalidateQueries({ queryKey: ["alerts"] });
+  };
+}
+
+export interface CreateStructureInput {
+  name: string;
+  type: Structure["type"];
+  lat: number;
+  lng: number;
+  riskLevel?: string;
+  lastInspected?: string;
+  criticalityWeight?: number;
+  zoneId?: string;
+}
+
+export function useCreateStructure() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: CreateStructureInput) =>
+      gql<{ createStructure: Structure }>(MUTATIONS.createStructure, { input }).then((d) =>
+        normalizeStructure(d.createStructure)
+      ),
+    onSuccess: (structure) => {
+      queryClient.invalidateQueries({ queryKey: ["structures"] });
+      toast.success(`${structure.name} is now being monitored`);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Could not register the structure");
+    },
+  });
+}
+
+export function useDeleteStructure() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => gql<{ deleteStructure: string }>(MUTATIONS.deleteStructure, { id }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["structures"] });
+      toast.success("Structure removed. Its detections and alerts were kept.");
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Could not remove the structure");
+    },
+  });
+}
+
+/**
+ * Live inference-service status for the admin page.
+ *
+ * Polled, because the free-tier ML service sleeps: an admin looking at
+ * "unreachable" should see it flip to "ready" once it wakes, without
+ * reloading.
+ */
+export function useMlStatus() {
+  return useQuery({
+    queryKey: queryKeys.mlStatus(),
+    queryFn: () => gql<{ mlStatus: MlStatus }>(QUERIES.mlStatus).then((d) => d.mlStatus),
+    refetchInterval: 60_000,
+  });
+}
+
+export function useUsers() {
+  return useQuery({
+    queryKey: queryKeys.users(),
+    queryFn: () => gql<{ users: AccountUser[] }>(QUERIES.users).then((d) => d.users ?? []),
+  });
+}
+
+export function useSetUserRole() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, role }: { id: string; role: Role }) =>
+      gql<{ setUserRole: AccountUser }>(MUTATIONS.setUserRole, { id, role }).then((d) => d.setUserRole),
+    onSuccess: (user) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.users() });
+      toast.success(`${user.email} is now ${user.role}`);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Could not change the role");
     },
   });
 }

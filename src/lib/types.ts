@@ -93,6 +93,31 @@ export interface Inspector {
   structuresCovered: number;
 }
 
+export type Role = "inspector" | "engineer" | "admin" | "public-read";
+
+export interface AccountUser {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  createdAt: string;
+}
+
+/**
+ * What the inference service reports about itself.
+ *
+ * The admin page used to render a hardcoded table of model versions with
+ * invented recall figures. Every field here comes from the live service, so
+ * the page can only show what is actually loaded.
+ */
+export interface MlStatus {
+  reachable: boolean;
+  modelLoaded: boolean;
+  modelVersion: string | null;
+  serviceUrl: string;
+  detail: string | null;
+}
+
 export interface ZoneRisk {
   zoneId: string;
   zoneName: string;

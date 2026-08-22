@@ -1,72 +1,76 @@
 "use client";
 
-import { toast } from "sonner";
-import { MoreVertical } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleSlash, Users as UsersIcon } from "lucide-react";
 import { Topbar } from "@/components/layout/Topbar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { EmptyState, ErrorState, LoadingRows } from "@/components/common/QueryState";
+import { useMlStatus, useSetUserRole, useUsers } from "@/hooks/use-vigileye-data";
+import type { Role } from "@/lib/types";
+import { formatDate } from "@/lib/utils";
 
-const ROLES = [
-  { name: "Structural Engineer", access: "Full structure detail, trend data, forecasts" },
-  { name: "Field Inspector", access: "Upload + view own submissions" },
-  { name: "Municipal Safety Officer", access: "Map overview, alert inbox, repair briefs" },
-  { name: "Admin", access: "User management, model version control" },
+const ROLES: { value: Role; label: string; access: string }[] = [
+  { value: "engineer", label: "Structural Engineer", access: "Register structures, full detail, trends, forecasts" },
+  { value: "inspector", label: "Field Inspector", access: "Upload inspection media, view results" },
+  { value: "public-read", label: "Municipal Safety Officer", access: "Map overview, alert inbox, repair briefs" },
+  { value: "admin", label: "Admin", access: "Everything, plus user management" },
 ];
 
-const MODEL_VERSIONS = [
-  {
-    name: "yolov11-crack",
-    version: "v1.3.0",
-    status: "active",
-    recall: "92.4%",
-    dataset: "CrackForest (118 labeled road-crack photos, real-world lighting/shadow variation)",
-  },
-  {
-    name: "yolov11-crack",
-    version: "v1.2.1",
-    status: "archived",
-    recall: "89.1%",
-    dataset: "CrackForest only (118 labeled road-crack photos)",
-  },
-  {
-    name: "deeplabv3-crack",
-    version: "v0.4.0",
-    status: "active",
-    recall: "88.7%",
-    dataset: "CrackForest segmentation masks (118 images, pixel-level crack ground truth)",
-  },
-  {
-    name: "sdnet-classifier",
-    version: "v0.1.0",
-    status: "active",
-    recall: "—",
-    dataset: "SDNET2018 (56,092 real images — bridge decks, walls, pavements, USU official release)",
-  },
-];
+const ROLE_LABEL = new Map(ROLES.map((r) => [r.value, r.label]));
 
+/**
+ * Admin console.
+ *
+ * This page previously rendered a hardcoded table of model versions —
+ * `yolov11-crack v1.3.0, recall 92.4%` and two more like it — for models that
+ * had never been trained, alongside "Promote to active" buttons that only
+ * fired a toast. Presenting invented accuracy figures as measurements is a
+ * serious thing to do in a structural-safety tool, so the table is gone.
+ *
+ * What replaces it is what the inference service actually reports about
+ * itself, including the honest answer when no model is loaded. The roles table
+ * likewise now grants roles instead of describing them.
+ */
 export default function AdminPage() {
+  const mlStatus = useMlStatus();
+  const users = useUsers();
+  const setUserRole = useSetUserRole();
+
   return (
     <>
       <Topbar title="Admin" />
-      <div className="min-h-0 flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Crack-detection model</CardTitle>
+            <CardDescription>
+              Read live from the inference service. Nothing on this card is hardcoded.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {mlStatus.isLoading ? (
+              <LoadingRows rows={2} />
+            ) : mlStatus.isError ? (
+              <ErrorState message={(mlStatus.error as Error)?.message} onRetry={() => mlStatus.refetch()} />
+            ) : mlStatus.data ? (
+              <ModelStatusPanel status={mlStatus.data} />
+            ) : null}
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle>Roles & access</CardTitle>
-            <CardDescription>Role-based access enforced at the API gateway and re-validated per service</CardDescription>
+            <CardDescription>Enforced at the API on every request, not just in this UI</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {ROLES.map((r) => (
-              <div key={r.name} className="flex items-center justify-between border-b border-border/30 pb-2 last:border-0">
-                <span className="text-sm font-medium">{r.name}</span>
-                <span className="text-sm text-muted-foreground">{r.access}</span>
+              <div
+                key={r.value}
+                className="flex items-center justify-between gap-4 border-b border-border/30 pb-2 last:border-0"
+              >
+                <span className="text-sm font-medium">{r.label}</span>
+                <span className="text-right text-sm text-muted-foreground">{r.access}</span>
               </div>
             ))}
           </CardContent>
@@ -74,54 +78,99 @@ export default function AdminPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Model versions</CardTitle>
-            <CardDescription>Served by the ML inference API in ../ml-model — trained on the real CrackForest dataset in ../ml-model/datasets (see datasets/README.md)</CardDescription>
+            <CardTitle>Accounts</CardTitle>
+            <CardDescription>
+              Signup always creates an inspector — nobody can make themselves an admin. Promote accounts here.
+            </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {MODEL_VERSIONS.map((m) => (
-              <div key={`${m.name}-${m.version}`} className="flex items-start justify-between gap-4 border-b border-border/30 pb-3 last:border-0">
-                <div className="min-w-0">
-                  <div>
-                    <span className="text-sm font-medium">{m.name}</span>
-                    <span className="ml-2 text-xs text-muted-foreground">{m.version}</span>
+          <CardContent>
+            {users.isLoading ? (
+              <LoadingRows rows={4} />
+            ) : users.isError ? (
+              <ErrorState message={(users.error as Error)?.message} onRetry={() => users.refetch()} />
+            ) : !users.data?.length ? (
+              <EmptyState icon={UsersIcon} title="No accounts yet" description="Nobody has signed up." />
+            ) : (
+              <div className="space-y-3">
+                {users.data.map((u) => (
+                  <div
+                    key={u.id}
+                    className="flex flex-wrap items-center justify-between gap-3 border-b border-border/30 pb-3 last:border-0"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{u.name || u.email}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {u.name ? `${u.email} · ` : ""}joined {formatDate(u.createdAt)}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Badge variant={u.role === "admin" ? "default" : "muted"}>
+                        {ROLE_LABEL.get(u.role) ?? u.role}
+                      </Badge>
+                      <select
+                        aria-label={`Role for ${u.email}`}
+                        value={u.role}
+                        disabled={setUserRole.isPending}
+                        onChange={(e) => setUserRole.mutate({ id: u.id, role: e.target.value as Role })}
+                        className="rounded-md border border-border bg-background px-2 py-1 text-xs"
+                      >
+                        {ROLES.map((r) => (
+                          <option key={r.value} value={r.value}>
+                            {r.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    Trained on: <span className="text-foreground">{m.dataset}</span>
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-3">
-                  <span className="text-xs text-muted-foreground">recall {m.recall}</span>
-                  <Badge variant={m.status === "active" ? "default" : "muted"}>{m.status}</Badge>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
-                      <MoreVertical className="h-4 w-4" />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuLabel>{m.name} {m.version}</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        disabled={m.status === "active"}
-                        onClick={() => toast.success(`${m.name} ${m.version} promoted to active — MODEL_PATH updated in ml-model/service.`)}
-                      >
-                        Promote to active
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        disabled={m.status === "archived"}
-                        onClick={() => toast(`${m.name} ${m.version} archived.`)}
-                      >
-                        Archive
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => toast(`Fetching eval report for ${m.version}…`)}>
-                        View eval report
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
+                ))}
               </div>
-            ))}
+            )}
           </CardContent>
         </Card>
       </div>
     </>
+  );
+}
+
+function ModelStatusPanel({
+  status,
+}: {
+  status: { reachable: boolean; modelLoaded: boolean; modelVersion: string | null; serviceUrl: string; detail: string | null };
+}) {
+  const state = !status.reachable
+    ? { icon: CircleSlash, label: "Unreachable", tone: "text-severity-critical" }
+    : status.modelLoaded
+      ? { icon: CheckCircle2, label: "Ready", tone: "text-severity-low" }
+      : { icon: AlertTriangle, label: "No model loaded", tone: "text-severity-high" };
+
+  const Icon = state.icon;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <Icon className={`h-5 w-5 ${state.tone}`} aria-hidden />
+        <span className="text-sm font-medium">{state.label}</span>
+      </div>
+
+      <dl className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-sm">
+        <dt className="text-muted-foreground">Model version</dt>
+        <dd>{status.modelVersion ?? "—"}</dd>
+        <dt className="text-muted-foreground">Service</dt>
+        <dd className="break-all font-mono text-xs">{status.serviceUrl}</dd>
+      </dl>
+
+      {status.detail && (
+        <p className="rounded-md border border-border/40 bg-muted/40 p-3 text-xs text-muted-foreground">
+          {status.detail}
+        </p>
+      )}
+
+      {status.reachable && !status.modelLoaded && (
+        <p className="text-xs text-muted-foreground">
+          Uploads will be rejected until weights are loaded. There are no accuracy figures to show because no
+          evaluated model exists yet — see <span className="font-mono">ml-model/ACCURACY.md</span>.
+        </p>
+      )}
+    </div>
   );
 }
