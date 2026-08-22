@@ -57,23 +57,78 @@ export function getGqlClient(): GraphQLClient {
   return client;
 }
 
-/** Thin wrapper that turns GraphQL/HTTP failures into something the query
- *  layer can branch on (see Providers: 401/403 are never retried). */
-export async function gql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+/**
+ * In-flight refresh, shared by every caller.
+ *
+ * The access cookie lives 15 minutes; the refresh cookie lives 30 days. The
+ * /api/auth/refresh route that trades one for the other existed but nothing
+ * ever called it — so 15 minutes after signing in, every query started
+ * returning 401 and the whole dashboard died with "Your session has expired"
+ * even though the session was perfectly renewable. Middleware still let the
+ * user in (it accepts either cookie), which made it look like a server fault
+ * rather than an expired token.
+ *
+ * Single-flight matters: a dashboard page fires several queries at once, and
+ * without this they would each POST a refresh and race to rotate the tokens.
+ */
+let refreshInFlight: Promise<boolean> | null = null;
+
+function refreshSession(): Promise<boolean> {
+  if (typeof window === "undefined") return Promise.resolve(false);
+
+  refreshInFlight ??= fetch("/api/auth/refresh", { method: "POST", credentials: "same-origin" })
+    .then((res) => res.ok)
+    .catch(() => false)
+    .finally(() => {
+      refreshInFlight = null;
+    });
+
+  return refreshInFlight;
+}
+
+function authError(message: string, status: number): Error {
+  const err = new Error(message);
+  (err as Error & { status?: number }).status = status;
+  return err;
+}
+
+/** Sends the user back to login, preserving where they were. */
+function redirectToLogin(): void {
+  if (typeof window === "undefined") return;
+  const next = window.location.pathname + window.location.search;
+  window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+}
+
+/**
+ * Thin wrapper that turns GraphQL/HTTP failures into something the query
+ * layer can branch on (see Providers: 401/403 are never retried).
+ *
+ * A 401 triggers one silent refresh-and-retry before giving up, so a normally
+ * expired access token is invisible to the user.
+ */
+export async function gql<T>(
+  query: string,
+  variables?: Record<string, unknown>,
+  { allowRefresh = true }: { allowRefresh?: boolean } = {}
+): Promise<T> {
   try {
     return await getGqlClient().request<T>(query, variables);
   } catch (error) {
     const status = (error as { response?: { status?: number } })?.response?.status;
+
     if (status === 401) {
-      const err = new Error("Your session has expired. Please sign in again.");
-      (err as Error & { status?: number }).status = 401;
-      throw err;
+      if (allowRefresh && (await refreshSession())) {
+        // New access cookie is set — replay the query once.
+        return gql<T>(query, variables, { allowRefresh: false });
+      }
+      redirectToLogin();
+      throw authError("Your session has expired. Please sign in again.", 401);
     }
+
     if (status === 403) {
-      const err = new Error("You don't have permission to view this.");
-      (err as Error & { status?: number }).status = 403;
-      throw err;
+      throw authError("You don't have permission to view this.", 403);
     }
+
     throw error;
   }
 }
@@ -162,7 +217,11 @@ export interface IngestResult {
  * Content-Type is deliberately NOT set: the browser must generate the
  * multipart boundary itself.
  */
-export async function ingestImage(structureId: string, file: File): Promise<IngestResult> {
+export async function ingestImage(
+  structureId: string,
+  file: File,
+  { allowRefresh = true }: { allowRefresh?: boolean } = {}
+): Promise<IngestResult> {
   const form = new FormData();
   // Field name must be "file" — see backend FileInterceptor("file").
   form.append("file", file, file.name);
@@ -176,6 +235,12 @@ export async function ingestImage(structureId: string, file: File): Promise<Inge
     });
   } catch {
     throw new Error("Network error — the upload never reached the server. Check your connection and try again.");
+  }
+
+  // Same refresh-and-retry as gql(): an expired access token should not cost
+  // the user their upload.
+  if (res.status === 401 && allowRefresh && (await refreshSession())) {
+    return ingestImage(structureId, file, { allowRefresh: false });
   }
 
   const payload = (await res.json().catch(() => null)) as
